@@ -153,6 +153,7 @@ allure-results
 .vscode
 
 key.yaml
+config/config2.yaml
 /data/
 data.ms
 examples/nb/
