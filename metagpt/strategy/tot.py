@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,7 +64,11 @@ class ThoughtSolverBase(BaseModel):
         )
         rsp = await self.llm.aask(msg=state_prompt + "\n" + OUTPUT_FORMAT)
         thoughts = CodeParser.parse_code(block="", text=rsp)
-        thoughts = eval(thoughts)
+        try:
+            thoughts = json.loads(thoughts)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse thoughts as JSON, attempting eval fallback: {thoughts[:100]}")
+            thoughts = eval(thoughts)  # noqa: S307 - fallback for non-standard LLM output
         # fixme 避免不跟随，生成过多nodes
         # valid_thoughts = [_node for idx, _node in enumerate(thoughts) if idx < self.n_generate_sample]
         return self.thought_tree.update_node(thoughts, current_node=current_node)
