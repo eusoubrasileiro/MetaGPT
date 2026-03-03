@@ -10,6 +10,8 @@ ref3: https://github.com/Significant-Gravitas/Auto-GPT/blob/master/autogpt/llm/t
 ref4: https://github.com/hwchase17/langchain/blob/master/langchain/chat_models/openai.py
 ref5: https://ai.google.dev/models/gemini
 """
+from functools import lru_cache
+
 import anthropic
 import tiktoken
 from openai.types import CompletionUsage
@@ -17,6 +19,19 @@ from openai.types.chat import ChatCompletionChunk
 
 from metagpt.logs import logger
 from metagpt.utils.ahttp_client import apost
+
+
+@lru_cache(maxsize=64)
+def _encoding_for_model(model: str) -> tiktoken.Encoding:
+    """Get tiktoken encoding for a model, with prefix-based fallback."""
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback for gpt-5 variants and other unknown models
+        if model.startswith("gpt-5") or model.startswith("openai/gpt-5"):
+            return tiktoken.encoding_for_model("gpt-4o")
+        logger.info(f"Warning: model {model} not found in tiktoken. Using cl100k_base encoding.")
+        return tiktoken.get_encoding("cl100k_base")
 
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
@@ -49,6 +64,9 @@ TOKEN_COSTS = {
     "o1-preview-2024-09-12": {"prompt": 0.015, "completion": 0.06},
     "o1-mini": {"prompt": 0.003, "completion": 0.012},
     "o1-mini-2024-09-12": {"prompt": 0.003, "completion": 0.012},
+    "gpt-5-mini": {"prompt": 0.00025, "completion": 0.002},
+    "gpt-5": {"prompt": 0.002, "completion": 0.010},
+    "gpt-5.2": {"prompt": 0.002, "completion": 0.010},
     "text-embedding-ada-002": {"prompt": 0.0004, "completion": 0.0},
     "glm-3-turbo": {"prompt": 0.0007, "completion": 0.0007},  # 128k version, prompt + completion tokens=0.005￥/k-tokens
     "glm-4": {"prompt": 0.014, "completion": 0.014},  # 128k version, prompt + completion tokens=0.1￥/k-tokens
@@ -230,6 +248,9 @@ TOKEN_MAX = {
     "o1-preview-2024-09-12": 128000,
     "o1-mini": 128000,
     "o1-mini-2024-09-12": 128000,
+    "gpt-5-mini": 1000000,
+    "gpt-5": 1000000,
+    "gpt-5.2": 1000000,
     "gpt-4o": 128000,
     "gpt-4o-2024-05-13": 128000,
     "gpt-4o-2024-08-06": 128000,
@@ -390,12 +411,8 @@ def count_input_tokens(messages, model="gpt-3.5-turbo-0125"):
             for key, value in message.items():
                 num_tokens += vo.count_tokens(str(value))
         return num_tokens
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        logger.info(f"Warning: model {model} not found in tiktoken. Using cl100k_base encoding.")
-        encoding = tiktoken.get_encoding("cl100k_base")
-    if model in {
+    encoding = _encoding_for_model(model)
+    if model.startswith("gpt-5") or model in {
         "gpt-3.5-turbo-0613",
         "gpt-3.5-turbo-16k-0613",
         "gpt-35-turbo",
@@ -423,6 +440,9 @@ def count_input_tokens(messages, model="gpt-3.5-turbo-0125"):
         "o1-preview-2024-09-12",
         "o1-mini",
         "o1-mini-2024-09-12",
+        "gpt-5-mini",
+        "gpt-5",
+        "gpt-5.2",
     }:
         tokens_per_message = 3  # # every reply is primed with <|start|>assistant<|message|>
         tokens_per_name = 1
@@ -480,11 +500,7 @@ def count_output_tokens(string: str, model: str) -> int:
         vo = anthropic.Client()
         num_tokens = vo.count_tokens(string)
         return num_tokens
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        logger.info(f"Warning: model {model} not found in tiktoken. Using cl100k_base encoding.")
-        encoding = tiktoken.get_encoding("cl100k_base")
+    encoding = _encoding_for_model(model)
     return len(encoding.encode(string))
 
 
